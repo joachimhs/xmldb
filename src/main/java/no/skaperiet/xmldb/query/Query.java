@@ -18,7 +18,7 @@ public class Query
 {
 	private String queryName;
 	private String query;
-	private Vector parameters;
+	private Vector<Parameter> parameters;
 
 	public Query(Element element)
 	{
@@ -30,7 +30,7 @@ public class Query
 	public Vector readParameters(NodeList elements)
 	{
 		Element element;
-		Parameter parameter;
+		IndexedParameter parameter;
 
 		Vector params = new Vector();
 
@@ -38,7 +38,7 @@ public class Query
 		{
 			element = (Element)elements.item(i);
 
-			parameter = new Parameter(element.getAttribute("name"),
+			parameter = new IndexedParameter(element.getAttribute("name"),
 									 Integer.parseInt(element.getAttribute("index")));
 
 			String type = element.getAttribute("type");
@@ -79,7 +79,7 @@ public class Query
 		return parameters.toString();
 	}
 
-	public boolean compare(List params)
+	public boolean compare(List<Parameter> params)
 	{
 		//Return false unless match is found
 		boolean match = false;
@@ -95,14 +95,14 @@ public class Query
 		//Iterate parameters
 		for (int i = 0; i < params.size(); i++)
 		{
-			Parameter otherParam = (Parameter)params.get(i);
+			Parameter otherParam = params.get(i);
 
 			//Assume a match is not found
 			match = false;
 			//Iterate parameters for this query to see if a match is found
 			for (int j = 0; j < parameters.size(); j++)
 			{
-				Parameter thisParam = (Parameter)parameters.elementAt(j);
+				Parameter thisParam = parameters.elementAt(j);
 				//if otherParam is part of this query, flag match = true
 				if (otherParam.compare(thisParam))
 					match = true;
