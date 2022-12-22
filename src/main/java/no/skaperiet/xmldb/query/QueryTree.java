@@ -20,11 +20,7 @@ public class QueryTree
 {
 	private HashSet queries;
 	private static Logger log = Logger.getLogger(QueryTree.class);
-
-	public QueryTree() {
-		queries = new HashSet();
-	}
-
+	
 	public QueryTree (String elemName, Element root)
 	{
 		queries = new HashSet();
@@ -72,18 +68,6 @@ public class QueryTree
 		{
 			System.err.println("QueryTree:openDocument(): " + e);
 			return null;
-		}
-	}
-
-	public void appendQueriesFromInputStream(String elemName, InputStream inputStream) {
-		NodeList elements = openDocument(inputStream).getDocumentElement().getElementsByTagName(elemName);
-		for (int i = 0; i < elements.getLength(); i++) {
-			Query query = new Query( (Element)elements.item(i));
-			if (!queries.add(query)) {
-				System.err.println("Unable to Append Query: " + query.getName() + ":::" + query.getParametersAsString());
-			} else {
-				log.debug("Appended Query: " + query.getName() + " ::: " + query.getParametersAsString());
-			}
 		}
 	}
 

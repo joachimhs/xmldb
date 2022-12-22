@@ -2,21 +2,26 @@ package no.skaperiet.xmldb;
 
 import java.io.File;
 import java.io.FilenameFilter;
-import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.stream.Stream;
 
 import javax.naming.NamingException;
 import javax.sql.DataSource;
 
+import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import no.skaperiet.xmldb.query.*;
+import no.skaperiet.xmldb.query.Parameter;
+import no.skaperiet.xmldb.query.Query;
+import no.skaperiet.xmldb.query.QueryTree;
 import org.apache.log4j.Logger;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
@@ -27,7 +32,7 @@ public class XmlDB {
 	private ResultSet rs = null;
 	private Statement stmt = null;
 	private DataSource dataSource = null;
-	private QueryTree tree = null;
+	QueryTree tree = null;
 	private String host;
 	private String db;
 	private String user;
@@ -44,13 +49,7 @@ public class XmlDB {
 		this.user = dbUser;
 		this.pass = dbPass;
 		this.queryfile = dbQueryFile;
-
-		addOrAppendFromQueriesFileOrDirectory(dbQueryFile);
-
-		connectDB();
-	}
-
-	public void addOrAppendFromQueriesFileOrDirectory(String dbQueryFile) {
+		
 		try {
 			if (Files.isDirectory(Paths.get(dbQueryFile))) {
 				File f = new File(dbQueryFile);
@@ -78,28 +77,16 @@ public class XmlDB {
 				}
 			} else if (Files.isRegularFile(Paths.get(dbQueryFile))) {
 				log.info("Parsing XML to TreeMap");
-				if (tree == null) {
-					tree = new QueryTree("sqlquery", dbQueryFile);
-				} else {
-					tree.appendQueriesFromFile("sqlquery", dbQueryFile);
-				}
-
+				tree = new QueryTree("sqlquery", queryfile);
 				log.info("Finished parsing XML to TreeMap");
 			}
 
 		} catch (Exception e) {
 			e.printStackTrace();
-			throw new RuntimeException("Unable to parse XMLDB Query File!");
-		}
-	}
-
-	public void appendFromQueriesFileStream(InputStream inputStream) {
-		if (tree == null) {
-			tree = new QueryTree();
+			throw new RuntimeException("Unable to parse XMLCB Query File!");
 		}
 
-		tree.appendQueriesFromInputStream("sqlquery", inputStream);
-
+		connectDB();
 	}
 
 	public String getConfigFileName() {
@@ -206,7 +193,7 @@ public class XmlDB {
 		return rs.getLong(columnIndex);
 	}
 
-	public boolean executeQuery(String name, Parameter... parameters) {
+	public boolean executeQuery(String name, Parameter ... parameters) {
 		List<Parameter> parameterList = new ArrayList<>();
 		if (parameters != null && parameters.length > 0) {
 			parameterList.addAll(Arrays.asList(parameters));
@@ -215,7 +202,7 @@ public class XmlDB {
 		return this.executeQuery(name, parameterList);
 	}
 
-	public Boolean executeUpdate(String name, Parameter... parameters) throws SQLException {
+	public Boolean executeUpdate(String name, Parameter ... parameters) throws SQLException {
 		List<Parameter> parameterList = new ArrayList<>();
 		if (parameters != null && parameters.length > 0) {
 			parameterList.addAll(Arrays.asList(parameters));
@@ -224,7 +211,7 @@ public class XmlDB {
 		return this.executeUpdate(name, parameterList);
 	}
 
-	public <T> List<T> executeQuery(String name, Class<T> clazz, Parameter... parameters) throws SQLException {
+	public <T> List<T> executeQuery(String name, Class<T> clazz, Parameter ... parameters) throws SQLException {
 		List<Parameter> parameterList = new ArrayList<>();
 		if (parameters != null && parameters.length > 0) {
 			parameterList.addAll(Arrays.asList(parameters));
@@ -233,7 +220,7 @@ public class XmlDB {
 		return this.executeQuery(name, parameterList, clazz);
 	}
 
-	public <T> T executeQueryForId(String name, Class<T> clazz, Parameter... parameters) throws SQLException {
+	public <T> T executeQueryForId(String name, Class<T> clazz, Parameter ... parameters) throws SQLException {
 		List<T> retList = executeQuery(name, clazz, parameters);
 
 		if (retList.size() > 1) {
@@ -254,7 +241,10 @@ public class XmlDB {
 			Query query = tree.getQuery(name, parameters);
 
 			if (query != null) {
-				statement = setParameters(query, statement, parameters);
+				String sql = query.getQuery();
+
+				statement = conn.prepareStatement(sql);
+				statement = setParameters(statement, parameters);
 				log.debug(query.getQuery());
 				log.debug("Parameters: " + parameters.toString());
 
@@ -295,7 +285,10 @@ public class XmlDB {
 			Query query = tree.getQuery(name, parameters);
 
 			if (query != null) {
-				statement = setParameters(query, statement, parameters);
+				String sql = query.getQuery();
+
+				statement = conn.prepareStatement(sql);
+				statement = setParameters(statement, parameters);
 				log.debug(query.getQuery());
 				log.debug("Parameters: " + parameters.toString());
 
@@ -319,6 +312,86 @@ public class XmlDB {
 		}
 
 		return retList;
+	}
+
+	public JsonObject executeGenericQuery(String sql) throws SQLException {
+		JsonObject retJson = new JsonObject();
+		JsonArray rows = new JsonArray();
+		JsonArray columns = null;
+
+		PreparedStatement statement = null;
+		ResultSet resultSet = null;
+		try {
+			if (conn == null || conn.isClosed())
+				connectDB();
+
+			statement = conn.prepareStatement(sql);
+			resultSet = statement.executeQuery();
+
+			boolean hadRows = false;
+			while (resultSet.next()) {
+				JsonObject row = convertResultSetToJson(resultSet);
+				rows.add(row);
+				hadRows = true;
+			}
+
+			if (hadRows) {
+				resultSet.first();
+				columns = getColumnsHeaders(resultSet);
+			}
+
+			retJson.add("rows", rows);
+			retJson.add("columns", columns);
+		} finally {
+			try {
+				resultSet.close();
+				statement.close();
+			} catch (Exception e) {
+			}
+		}
+
+		return retJson;
+	}
+
+	public int executeGenericUpdate(String sql) throws SQLException {
+		int numRowsAffected = 0;
+		PreparedStatement statement = null;
+		ResultSet resultSet = null;
+		try {
+			if (conn == null || conn.isClosed())
+				connectDB();
+
+			statement = conn.prepareStatement(sql);
+			numRowsAffected = statement.executeUpdate();
+
+		} finally {
+			try {
+				resultSet.close();
+				statement.close();
+			} catch (Exception e) {
+			}
+		}
+
+		return numRowsAffected;
+	}
+
+	private JsonArray getColumnsHeaders(ResultSet rs) throws SQLException {
+		ResultSetMetaData rsmd = rs.getMetaData();
+		int numColumns = rsmd.getColumnCount();
+		JsonArray cols = new JsonArray();
+
+		for (int i = 1; i < numColumns + 1; ++i) {
+			String column_name = rsmd.getColumnName(i);
+			String column_label = rsmd.getColumnLabel(i);
+
+			if (column_label != null && column_label.length() > 0 && !column_name.equals(column_label)) {
+				column_name = column_label;
+			}
+
+			cols.add(column_name);
+		}
+
+		return cols;
 	}
 
 	private JsonObject convertResultSetToJson(ResultSet rs) throws SQLException {
@@ -398,7 +471,9 @@ public class XmlDB {
 			Query query = tree.getQuery(name, parameters);
 
 			if (query != null) {
-				statement = setParameters(query, statement, parameters);
+				statement = conn.prepareStatement(query.getQuery());
+
+				statement = setParameters(statement, parameters);
 				log.debug(query.getQuery());
 				log.debug("Parameters: " + parameters.toString());
 
@@ -419,56 +494,27 @@ public class XmlDB {
 		return success;
 	}
 
-	private PreparedStatement setParameters(Query query, PreparedStatement statement, List<Parameter> parameters) throws SQLException {
+	private PreparedStatement setParameters(PreparedStatement statement, List<Parameter> parameters) throws SQLException {
 		// For each parameter check it's type and set it's value in the
 		// statement.
 		for (int i = 0; i < parameters.size(); i++) {
 			Parameter parameter = parameters.get(i);
 			// log.debug("setParameters(): " + parameter.getIndex() + " - " +
 			// parameter.getName() + " - " + parameter.getValue());
-
-			if (parameter instanceof IndexedParameter) {
-				statement = conn.prepareStatement(query.getQuery());
-				IndexedParameter indexedParameter = (IndexedParameter)parameter;
-				Object param = parameter.getValue();
-				if (param instanceof Integer) {
-					statement.setInt(indexedParameter.getIndex(), (Integer) param);
-				} else if (param instanceof Long) {
-					statement.setLong(indexedParameter.getIndex(), (Long) param);
-				} else if (param instanceof Timestamp) {
-					statement.setTimestamp(indexedParameter.getIndex(), (Timestamp) param);
-				} else if (param instanceof Double) {
-					statement.setDouble(indexedParameter.getIndex(), (Double) param);
-				} else if (param instanceof String) {
-					statement.setString(indexedParameter.getIndex(), (String) param);
-				} else {
-					statement.setObject(indexedParameter.getIndex(), param);
-				}
-			} else if (parameter instanceof NamedParameter) {
-				String sql = query.getQuery();
-
-				NamedParameter namedParameter = (NamedParameter) parameter;
-				Object param = parameter.getValue();
-				if (param instanceof Integer) {
-					sql.replaceAll(":" + namedParameter.getName(), ((Integer)param).toString());
-				} else if (param instanceof Long) {
-					sql.replaceAll(":" + namedParameter.getName(), ((Long)param).toString());
-				} else if (param instanceof Timestamp) {
-					sql.replaceAll(":" + namedParameter.getName(), ((Timestamp)param).toString());
-				} else if (param instanceof Double) {
-					sql.replaceAll(":" + namedParameter.getName(), ((Double)param).toString());
-				} else if (param instanceof String) {
-					sql.replaceAll(":" + namedParameter.getName(), "'" + ((String)param).toString() + "'");
-				} else {
-					sql.replaceAll(":" + namedParameter.getName(), "'" + ((String)param).toString() + "'");
-				}
-
-				statement = conn.prepareStatement(sql);
+			Object param = parameter.getValue();
+			if (param instanceof Integer) {
+				statement.setInt(parameter.getIndex(), (Integer) param);
+			} else if (param instanceof Long) {
+				statement.setLong(parameter.getIndex(), (Long) param);
+			} else if (param instanceof Timestamp) {
+				statement.setTimestamp(parameter.getIndex(), (Timestamp) param);
+			} else if (param instanceof Double) {
+				statement.setDouble(parameter.getIndex(), (Double) param);
+			} else if (param instanceof String) {
+				statement.setString(parameter.getIndex(), (String) param);
+			} else {
+				statement.setObject(parameter.getIndex(), param);
 			}
-		}
-
-		if (statement == null) {
-			statement = conn.prepareStatement(query.getQuery());
 		}
 
 		return statement;
