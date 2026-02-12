@@ -39,11 +39,11 @@
 	<distributionManagement>
 		<repository>
 			<id>nexus</id>
-			<url>https://135.181.145.18:8081/repository/skaperiet-repository/</url>
+			<url>https://nexus.skaperiet.no/repository/skaperiet-repository/</url>
 		</repository>
 		<snapshotRepository>
 			<id>nexus</id>
-			<url>https://135.181.145.18:8081/repository/skaperiet-repository/</url>
+			<url>https://nexus.skaperiet.no/repository/skaperiet-repository/</url>
 		</snapshotRepository>
 	</distributionManagement>
 
@@ -69,6 +69,12 @@
 			<name>Maven Repository</name>
 			<url>https://repo1.maven.org/maven2</url>
 			<layout>default</layout>
+		</repository>
+
+		<repository>
+			<id>nexus</id>
+			<name>My Private Maven Repository</name>
+			<url>https://nexus.skaperiet.no/repository/skaperiet-repository/</url>
 		</repository>
 	</repositories>
 </project>
